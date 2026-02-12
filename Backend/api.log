@@ -1,0 +1,14 @@
+2026-02-13 03:41:05,813 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2026-02-13 03:41:05,814 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2026-02-13 03:41:05,816 - werkzeug - INFO -  * Restarting with stat
+2026-02-13 03:41:08,585 - werkzeug - WARNING -  * Debugger is active!
+2026-02-13 03:41:08,595 - werkzeug - INFO -  * Debugger PIN: 740-288-721
+2026-02-13 03:42:37,287 - werkzeug - INFO - 127.0.0.1 - - [13/Feb/2026 03:42:37] "[33mGET /api/history HTTP/1.1[0m" 404 -
+2026-02-13 03:42:37,325 - werkzeug - INFO - 127.0.0.1 - - [13/Feb/2026 03:42:37] "[33mGET /api/history HTTP/1.1[0m" 404 -
+2026-02-13 03:42:37,642 - werkzeug - INFO - 127.0.0.1 - - [13/Feb/2026 03:42:37] "[33mGET /api/history HTTP/1.1[0m" 404 -
+2026-02-13 03:42:39,580 - werkzeug - INFO - 127.0.0.1 - - [13/Feb/2026 03:42:39] "[33mGET /api/history HTTP/1.1[0m" 404 -
+2026-02-13 03:42:39,894 - werkzeug - INFO - 127.0.0.1 - - [13/Feb/2026 03:42:39] "[33mGET /api/history HTTP/1.1[0m" 404 -
+2026-02-13 03:42:40,210 - werkzeug - INFO - 127.0.0.1 - - [13/Feb/2026 03:42:40] "[33mGET /api/history HTTP/1.1[0m" 404 -
+2026-02-13 03:43:08,781 - werkzeug - INFO - 127.0.0.1 - - [13/Feb/2026 03:43:08] "[33mOPTIONS /api/register HTTP/1.1[0m" 404 -
+2026-02-13 03:43:19,267 - werkzeug - INFO - 127.0.0.1 - - [13/Feb/2026 03:43:19] "[33mOPTIONS /api/register HTTP/1.1[0m" 404 -

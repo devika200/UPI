@@ -1,0 +1,9 @@
+.navbar{
+    background-color: #333;
+  padding: 10px 20px;
+  position: fixed;  /* Fix navbar at the top */
+  top: 0;           /* Align navbar to the top */
+  left: 0;          /* Make sure it's aligned to the left */
+  width: 100%;      /* Make navbar span the full width */
+  z-index: 1000; 
+}

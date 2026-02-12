@@ -1,0 +1,32 @@
+.about-container {
+    max-width: 800px;
+    margin: 20px auto;
+    padding: 20px;
+    font-family: sans-serif;
+    line-height: 1.6;
+  }
+  
+  .about-section,
+  .history-section {
+    margin-bottom: 30px;
+  }
+  
+  .about-section h2,
+  .history-section h2 {
+    color: #333;
+    margin-bottom: 15px;
+  }
+  
+  .about-section p,
+  .history-section p {
+    color: #555;
+  }
+  
+  .about-section ul {
+    list-style-type: disc;
+    margin-left: 20px;
+  }
+  
+  .about-section li {
+    margin-bottom: 5px;
+  }
