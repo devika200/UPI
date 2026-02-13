@@ -279,50 +279,143 @@ def check_fraud():
         df = pd.DataFrame([feature_vector], columns=feature_columns)
         input_data = df.values
 
-        # Make prediction
+        # Make prediction with HMM model
+        fraud_detected = False
+        model_confidence = 0.0
+        
         if hmm_model is not None:
             try:
-                anomaly_prediction = hmm_model.detect_anomalies(input_data)
-                fraud_detected = bool(anomaly_prediction[0])
+                # Get user's recent transactions for context (lag features)
+                if transactions_collection is not None:
+                    recent_txs = list(transactions_collection.find(
+                        {"username": current_user_email}
+                    ).sort("timestamp", -1).limit(5))
+                    
+                    # Build sequence of feature vectors
+                    sequence_data = []
+                    for tx in reversed(recent_txs[-3:]):  # Last 3 transactions
+                        try:
+                            past_features = calculate_features(
+                                current_user_email,
+                                tx.get("Receiver UPI ID", receiver_upi),
+                                float(tx.get("Transaction Amount (INR)", 0)),
+                                pd.to_datetime(tx.get("Transaction Time", datetime.now()))
+                            )
+                            sequence_data.append(past_features)
+                        except:
+                            pass
+                    
+                    # Add current transaction
+                    sequence_data.append(feature_vector)
+                    
+                    # Need at least 2 transactions for the model
+                    if len(sequence_data) >= 2:
+                        sequence_array = np.array(sequence_data)
+                        anomaly_prediction = hmm_model.detect_anomalies(sequence_array)
+                        fraud_detected = bool(anomaly_prediction[-1])  # Last one is current transaction
+                        model_confidence = 0.8 if fraud_detected else 0.2
+                        logger.info(f"HMM Model prediction: {fraud_detected} (with {len(sequence_data)} transactions in sequence)")
+                    else:
+                        # Not enough history, use single transaction with padding
+                        logger.info("Not enough transaction history for HMM, using single transaction")
+                        # Pad with current transaction repeated
+                        padded_data = np.array([feature_vector] * 3)
+                        anomaly_prediction = hmm_model.detect_anomalies(padded_data)
+                        fraud_detected = bool(anomaly_prediction[-1])
+                        model_confidence = 0.5  # Lower confidence with padding
+                else:
+                    # No database, use single transaction with padding
+                    padded_data = np.array([feature_vector] * 3)
+                    anomaly_prediction = hmm_model.detect_anomalies(padded_data)
+                    fraud_detected = bool(anomaly_prediction[-1])
+                    model_confidence = 0.5
+                    
             except Exception as e:
-                logger.warning(f"Model prediction failed: {e}. Using rule-based approach.")
+                logger.error(f"Model prediction failed: {e}")
+                logger.error(f"Feature vector shape: {np.array([feature_vector]).shape}")
+                logger.error(f"Feature vector: {feature_vector}")
                 fraud_detected = False
-        else:
-            # Rule-based fraud detection if no model
-            fraud_detected = False
-            
-            # Check for suspicious patterns
-            if transaction_amount > 50000:  # Very high amount
-                fraud_detected = True
-            elif feature_vector[1] > transaction_amount * 0.8:  # Huge difference from last transaction
-                fraud_detected = True
-            elif feature_vector[2] > 10:  # Extremely high frequency
-                fraud_detected = True
-            elif feature_vector[3] > 0.8:  # Very unusual time
-                fraud_detected = True
-
-        # Calculate fraud score (0.0 to 1.0)
-        if fraud_detected:
-            fraud_score = min(0.9, 0.5 + (feature_vector[7] * 0.4))  # Based on risk score
-        else:
-            fraud_score = max(0.1, feature_vector[7] * 0.3)  # Low risk
+                model_confidence = 0.0
         
-        # Determine risk factors
-        risk_factors = []
-        if transaction_amount > 10000:
-            risk_factors.append("High transaction amount")
-        if feature_vector[2] > 5:  # High frequency
-            risk_factors.append("Unusual transaction frequency")
-        if feature_vector[3] > 0.5:  # Time anomaly
-            risk_factors.append("Unusual transaction time")
-        if fraud_detected:
-            risk_factors.append("Pattern matches known fraud signatures")
+        logger.info(f"Model fraud decision: {fraud_detected} (confidence: {model_confidence})")
 
-        # Generate recommendation
+        # Calculate fraud score based on model confidence
         if fraud_detected:
-            recommendation = "This transaction shows suspicious patterns. We recommend additional verification before proceeding."
+            fraud_score = max(0.6, model_confidence)
         else:
-            recommendation = "Transaction appears normal based on historical patterns."
+            fraud_score = min(0.3, 1.0 - model_confidence)
+        
+        # Determine risk factors based on MODEL's analysis and USER's patterns
+        risk_factors = []
+        
+        if fraud_detected:
+            risk_factors.append("🤖 ML Model detected anomalous transaction pattern")
+        
+        # Dynamic thresholds based on user's history
+        if transactions_collection is not None:
+            try:
+                # Get user's transaction statistics
+                user_txs = list(transactions_collection.find(
+                    {"username": current_user_email},
+                    {"Transaction Amount (INR)": 1}
+                ))
+                
+                if user_txs:
+                    amounts = [tx.get("Transaction Amount (INR)", 0) for tx in user_txs]
+                    user_avg_amount = np.mean(amounts)
+                    user_max_amount = np.max(amounts)
+                    user_std_amount = np.std(amounts) if len(amounts) > 1 else 0
+                    
+                    # Check if current amount is unusual FOR THIS USER
+                    if user_std_amount > 0:
+                        z_score = (transaction_amount - user_avg_amount) / user_std_amount
+                        if z_score > 3:  # More than 3 standard deviations
+                            risk_factors.append(f"📊 Amount is {z_score:.1f}x higher than your typical pattern (avg: ₹{user_avg_amount:,.0f})")
+                        elif z_score > 2:
+                            risk_factors.append(f"📊 Amount is significantly higher than your usual (avg: ₹{user_avg_amount:,.0f})")
+                    
+                    # Check if it's the highest transaction ever
+                    if transaction_amount > user_max_amount:
+                        risk_factors.append(f"💰 This is your highest transaction ever (previous max: ₹{user_max_amount:,.0f})")
+                    
+                    # Check deviation from last transaction
+                    if feature_vector[1] > user_avg_amount:
+                        risk_factors.append(f"⚡ Large jump from your last transaction (₹{feature_vector[1]:,.0f} increase)")
+            except Exception as e:
+                logger.warning(f"Could not calculate user statistics: {e}")
+        
+        # Frequency analysis (already personalized)
+        if feature_vector[2] > 10:
+            risk_factors.append(f"⚡ Unusually high transaction frequency for you ({feature_vector[2]:.1f} transactions/month)")
+        elif feature_vector[2] > 5:
+            risk_factors.append(f"⚡ Higher than normal transaction frequency ({feature_vector[2]:.1f} transactions/month)")
+        
+        # Time anomaly (already personalized to user's habits)
+        if feature_vector[3] > 0.8:
+            risk_factors.append("🕐 Transaction at highly unusual time compared to your pattern")
+        elif feature_vector[3] > 0.5:
+            risk_factors.append("🕐 Transaction at unusual time for you")
+        
+        # New recipient check
+        if feature_vector[4] == 0:
+            risk_factors.append("👤 First transaction to this recipient")
+        
+        # If model detected fraud but no specific factors, add generic message
+        if fraud_detected and len(risk_factors) == 1:  # Only has the ML detection message
+            risk_factors.append("🔍 Transaction pattern deviates from your normal behavior")
+        
+        if not risk_factors:
+            risk_factors.append("✅ Transaction matches your normal patterns")
+
+        # Generate recommendation based on fraud score
+        if fraud_score >= 0.8:
+            recommendation = "⚠️ HIGH RISK: This transaction shows multiple suspicious patterns. We strongly recommend canceling this transaction and verifying with the recipient through alternate means."
+        elif fraud_score >= 0.6:
+            recommendation = "⚠️ SUSPICIOUS: This transaction shows concerning patterns. Please verify the recipient details and transaction purpose before proceeding."
+        elif fraud_score >= 0.4:
+            recommendation = "⚠️ MODERATE RISK: Some unusual patterns detected. Double-check the transaction details before confirming."
+        else:
+            recommendation = "✅ Transaction appears normal based on your historical patterns. Safe to proceed."
 
         # Save to database with user's email
         if transactions_collection is not None:
