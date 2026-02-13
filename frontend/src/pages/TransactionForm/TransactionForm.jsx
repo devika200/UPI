@@ -20,27 +20,27 @@ const TransactionForm = () => {
 
   const validateForm = () => {
     const errors = {};
-    
+
     if (!formData.amount || isNaN(Number(formData.amount)) || Number(formData.amount) <= 0) {
       errors.amount = "Please enter a valid amount";
     }
-    
+
     if (!formData.sender || formData.sender.trim() === "") {
       errors.sender = "Sender UPI ID is required";
     } else if (!formData.sender.includes("@")) {
       errors.sender = "Enter a valid UPI ID (e.g., name@bank)";
     }
-    
+
     if (!formData.receiver || formData.receiver.trim() === "") {
       errors.receiver = "Receiver UPI ID is required";
     } else if (!formData.receiver.includes("@")) {
       errors.receiver = "Enter a valid UPI ID (e.g., name@bank)";
     }
-    
+
     if (!formData.timestamp) {
       errors.timestamp = "Transaction time is required";
     }
-    
+
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -48,7 +48,7 @@ const TransactionForm = () => {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
-    
+
     // Clear specific error when field is being edited
     if (formErrors[name]) {
       setFormErrors({ ...formErrors, [name]: null });
@@ -58,14 +58,23 @@ const TransactionForm = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
-    
+
     if (!validateForm()) {
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
+      // Get JWT token from localStorage
+      const token = localStorage.getItem("authToken");
+
+      if (!token) {
+        setError("Please login to check transactions.");
+        setLoading(false);
+        return;
+      }
+
       // Format data before sending
       const dataToSend = {
         ...formData,
@@ -73,13 +82,18 @@ const TransactionForm = () => {
         // Ensure timestamp is in ISO format
         timestamp: new Date(formData.timestamp).toISOString()
       };
-      
+
       const response = await axios.post(
-        "http://localhost:5000/api/check_fraud", 
+        "http://localhost:5000/api/check_fraud",
         dataToSend,
-        { timeout: 10000 } // 10 second timeout
+        {
+          timeout: 10000, // 10 second timeout
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
       );
-      
+
       setResult(response.data);
     } catch (error) {
       console.error("Error:", error);
@@ -114,7 +128,7 @@ const TransactionForm = () => {
   return (
     <div className="transaction-form-container">
       <h2>Transaction Risk Assessment</h2>
-      
+
       {error && (
         <div className="error-message">
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -125,65 +139,65 @@ const TransactionForm = () => {
           <span>{error}</span>
         </div>
       )}
-      
+
       {!result ? (
         <form onSubmit={handleSubmit} className="form-grid">
           <div className="form-group">
             <label htmlFor="amount">Amount (₹)</label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               id="amount"
-              name="amount" 
+              name="amount"
               value={formData.amount}
-              placeholder="Enter amount" 
+              placeholder="Enter amount"
               onChange={handleChange}
             />
             {formErrors.amount && <p className="field-error">{formErrors.amount}</p>}
           </div>
-          
+
           <div className="form-group">
             <label htmlFor="sender">Sender UPI ID</label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               id="sender"
-              name="sender" 
+              name="sender"
               value={formData.sender}
-              placeholder="e.g., yourname@bank" 
+              placeholder="e.g., yourname@bank"
               onChange={handleChange}
             />
             {formErrors.sender && <p className="field-error">{formErrors.sender}</p>}
           </div>
-          
+
           <div className="form-group">
             <label htmlFor="receiver">Receiver UPI ID</label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               id="receiver"
-              name="receiver" 
+              name="receiver"
               value={formData.receiver}
-              placeholder="e.g., merchant@bank" 
+              placeholder="e.g., merchant@bank"
               onChange={handleChange}
             />
             {formErrors.receiver && <p className="field-error">{formErrors.receiver}</p>}
           </div>
-          
+
           <div className="form-group">
             <label htmlFor="timestamp">Transaction Time</label>
-            <input 
-              type="datetime-local" 
+            <input
+              type="datetime-local"
               id="timestamp"
-              name="timestamp" 
+              name="timestamp"
               value={formData.timestamp}
               onChange={handleChange}
             />
             {formErrors.timestamp && <p className="field-error">{formErrors.timestamp}</p>}
           </div>
-          
+
           <div className="form-group">
             <label htmlFor="category">Category</label>
-            <select 
+            <select
               id="category"
-              name="category" 
+              name="category"
               value={formData.category}
               onChange={handleChange}
             >
@@ -194,19 +208,19 @@ const TransactionForm = () => {
               <option value="other">Other</option>
             </select>
           </div>
-          
+
           <div className="form-group">
             <label htmlFor="description">Description (Optional)</label>
-            <textarea 
+            <textarea
               id="description"
-              name="description" 
+              name="description"
               value={formData.description}
-              placeholder="Add transaction notes" 
+              placeholder="Add transaction notes"
               onChange={handleChange}
               rows="3"
             ></textarea>
           </div>
-          
+
           <div className="form-actions">
             <button type="button" onClick={resetForm} className="reset-button">Reset</button>
             <button type="submit" className="submit-button" disabled={loading}>
@@ -245,14 +259,14 @@ const TransactionForm = () => {
               )}
             </h3>
           </div>
-          
+
           <div className="result-details">
             <div className="result-summary">
               <div className="summary-item">
                 <span>Risk Score:</span>
-                <div 
-                  className="risk-meter" 
-                  style={{ 
+                <div
+                  className="risk-meter"
+                  style={{
                     "--risk-percent": `${result.fraud_score * 100}%`,
                     "--risk-color": getRiskLevel(result.fraud_score).color
                   }}
@@ -260,7 +274,7 @@ const TransactionForm = () => {
                   <div className="risk-level">{getRiskLevel(result.fraud_score).level}</div>
                 </div>
               </div>
-              
+
               {result.risk_factors && (
                 <div className="summary-item">
                   <span>Risk Factors:</span>
@@ -271,7 +285,7 @@ const TransactionForm = () => {
                   </ul>
                 </div>
               )}
-              
+
               {result.recommendation && (
                 <div className="summary-item">
                   <span>Recommendation:</span>
@@ -279,7 +293,7 @@ const TransactionForm = () => {
                 </div>
               )}
             </div>
-            
+
             <div className="transaction-summary">
               <h4>Transaction Details</h4>
               <div className="details-grid">
@@ -308,7 +322,7 @@ const TransactionForm = () => {
               </div>
             </div>
           </div>
-          
+
           <div className="result-actions">
             {result.is_fraud ? (
               <>

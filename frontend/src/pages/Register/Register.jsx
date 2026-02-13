@@ -32,9 +32,10 @@ const Register = () => {
       if (response.ok) {
         // Registration successful
         console.log("Registration successful:", data);
+        alert("Registration successful! Please login.");
         navigate("/login"); // Redirect to login page
       } else {
-        setError(data.message || "Registration failed. Please try again.");
+        setError(data.error || data.message || "Registration failed. Please try again.");
       }
     } catch (err) {
       console.error("Error during registration:", err);

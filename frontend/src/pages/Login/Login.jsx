@@ -12,21 +12,21 @@ const Login = () => {
 
   const validateForm = () => {
     const newErrors = {};
-    
+
     // Email validation
     if (!credentials.email) {
       newErrors.email = "Email is required";
     } else if (!/\S+@\S+\.\S+/.test(credentials.email)) {
       newErrors.email = "Email is invalid";
     }
-    
+
     // Password validation
     if (!credentials.password) {
       newErrors.password = "Password is required";
     } else if (credentials.password.length < 8) {
       newErrors.password = "Password must be at least 8 characters";
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -34,7 +34,7 @@ const Login = () => {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setCredentials({ ...credentials, [name]: value });
-    
+
     // Clear error when user starts typing
     if (errors[name]) {
       setErrors({ ...errors, [name]: "" });
@@ -43,31 +43,44 @@ const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!validateForm()) return;
-    
+
     setIsLoading(true);
-    
+
     try {
-      // Simulating API call with timeout
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // TODO: Replace with actual API call for authentication
-      if (credentials.email === "admin@example.com" && credentials.password === "password") {
-        // Store auth token instead of user credentials
-        localStorage.setItem("authToken", "example-token-would-come-from-server");
+      // Call actual API for authentication
+      const response = await fetch("http://localhost:5000/api/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: credentials.email,
+          password: credentials.password
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // Store auth token from server
+        localStorage.setItem("authToken", data.access_token);
+        localStorage.setItem("username", data.username || credentials.email);
+        console.log("Login successful:", data);
         navigate("/transaction");
       } else {
+        // Handle error response
         setLoginAttempts(prev => prev + 1);
-        
+
         if (loginAttempts >= 2) {
           setErrors({ general: "Too many failed attempts. Please try again later or reset your password." });
         } else {
-          setErrors({ general: "Invalid credentials. Please try again." });
+          setErrors({ general: data.error || "Invalid credentials. Please try again." });
         }
       }
     } catch (error) {
-      setErrors({ general: "Login failed. Please try again later." });
+      setErrors({ general: "Login failed. Please check your connection and try again." });
       console.error("Login error:", error);
     } finally {
       setIsLoading(false);
@@ -82,33 +95,33 @@ const Login = () => {
     <div className="login-container">
       <h2>Welcome Back</h2>
       <p className="login-subtitle">Please enter your credentials to continue</p>
-      
+
       {errors.general && (
         <div className="error-message">{errors.general}</div>
       )}
-      
+
       <form onSubmit={handleSubmit} noValidate>
         <div className="form-group">
           <label htmlFor="email">Email</label>
-          <input 
-            type="email" 
+          <input
+            type="email"
             id="email"
-            name="email" 
+            name="email"
             value={credentials.email}
-            onChange={handleChange} 
+            onChange={handleChange}
             className={errors.email ? "input-error" : ""}
             disabled={isLoading}
             autoComplete="username"
           />
           {errors.email && <span className="error-text">{errors.email}</span>}
         </div>
-        
+
         <div className="form-group">
           <label htmlFor="password">Password</label>
-          <input 
-            type="password" 
+          <input
+            type="password"
             id="password"
-            name="password" 
+            name="password"
             value={credentials.password}
             onChange={handleChange}
             className={errors.password ? "input-error" : ""}
@@ -117,27 +130,27 @@ const Login = () => {
           />
           {errors.password && <span className="error-text">{errors.password}</span>}
         </div>
-        
+
         <div className="form-actions">
-          <button 
-            type="button" 
-            className="text-button" 
+          <button
+            type="button"
+            className="text-button"
             onClick={handleForgotPassword}
             disabled={isLoading}
           >
             Forgot Password?
           </button>
         </div>
-        
-        <button 
-          type="submit" 
+
+        <button
+          type="submit"
           className={`submit-button ${isLoading ? "loading" : ""}`}
           disabled={isLoading}
         >
           {isLoading ? "Logging in..." : "Log In"}
         </button>
       </form>
-      
+
       <div className="register-link">
         <p>Don't have an account? <a href="/register">Sign up</a></p>
       </div>

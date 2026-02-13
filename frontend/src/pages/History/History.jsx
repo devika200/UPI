@@ -15,13 +15,32 @@ const History = () => {
     const fetchTransactions = async () => {
       try {
         setLoading(true);
-        // Add a timeout for demonstration purposes
-        const response = await axios.get("http://localhost:5000/api/history");
+        // Get JWT token from localStorage
+        const token = localStorage.getItem("authToken");
+
+        if (!token) {
+          setError("Please login to view transaction history.");
+          setLoading(false);
+          return;
+        }
+
+        // Send request with Authorization header
+        const response = await axios.get("http://localhost:5000/api/history", {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        });
+
         setTransactions(response.data);
         setError(null);
       } catch (error) {
         console.error("Error fetching transactions:", error);
-        setError("Failed to fetch transaction history. Please try again later.");
+        if (error.response?.status === 401) {
+          setError("Session expired. Please login again.");
+          localStorage.removeItem("authToken");
+        } else {
+          setError("Failed to fetch transaction history. Please try again later.");
+        }
       } finally {
         setLoading(false);
       }
@@ -69,12 +88,12 @@ const History = () => {
   const totalPages = Math.ceil(sortedTransactions.length / itemsPerPage);
 
   const formatDate = (dateString) => {
-    const options = { 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric', 
-      hour: '2-digit', 
-      minute: '2-digit' 
+    const options = {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
     };
     return new Date(dateString).toLocaleDateString(undefined, options);
   };
@@ -137,8 +156,8 @@ const History = () => {
               <tbody>
                 {currentTransactions.length > 0 ? (
                   currentTransactions.map((txn, index) => (
-                    <tr 
-                      key={index} 
+                    <tr
+                      key={index}
                       className={txn.is_fraud ? "fraud-transaction" : "legitimate-transaction"}
                     >
                       <td className="amount-cell">{formatAmount(txn.amount)}</td>
@@ -165,7 +184,7 @@ const History = () => {
 
           {sortedTransactions.length > itemsPerPage && (
             <div className="pagination">
-              <button 
+              <button
                 onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                 disabled={currentPage === 1}
                 className="pagination-button"
@@ -175,7 +194,7 @@ const History = () => {
               <span className="page-info">
                 Page {currentPage} of {totalPages}
               </span>
-              <button 
+              <button
                 onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                 disabled={currentPage === totalPages}
                 className="pagination-button"
