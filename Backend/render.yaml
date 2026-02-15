@@ -2,6 +2,7 @@ services:
   - type: web
     name: upi-fraud-detection-api
     env: python
+    rootDir: Backend
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn mainapp:app
     envVars:
