@@ -25,7 +25,7 @@ class AutoRegressiveHMM:
             for feature in df.columns:
                 df[f'{feature}_Lag_{lag}'] = df[feature].shift(lag)
         df.dropna(inplace=True)
-        return df.value
+        return df.values
 
     def fit(self, data):
         """Fit the ARLG-HMM model."""
