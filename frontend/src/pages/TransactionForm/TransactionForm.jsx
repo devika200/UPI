@@ -94,6 +94,9 @@ const TransactionForm = () => {
         }
       );
 
+      console.log("Backend response:", response.data);
+      console.log("is_fraud value:", response.data.is_fraud);
+      console.log("is_fraud type:", typeof response.data.is_fraud);
       setResult(response.data);
     } catch (error) {
       console.error("Error:", error);
@@ -123,6 +126,16 @@ const TransactionForm = () => {
     if (score >= 0.8) return { level: "High", color: "#ef4444" };
     if (score >= 0.5) return { level: "Medium", color: "#f59e0b" };
     return { level: "Low", color: "#10b981" };
+  };
+
+  // Get transaction status based on prediction
+  const getTransactionStatus = () => {
+    if (!result || !result.prediction) return "normal";
+
+    const pred = result.prediction.toLowerCase();
+    if (pred === "fraud" || pred === "fraudulent") return "fraudulent";
+    if (pred === "suspicious") return "suspicious";
+    return "normal";
   };
 
   return (
@@ -237,16 +250,25 @@ const TransactionForm = () => {
         </form>
       ) : (
         <div className="result-container">
-          <div className={`result-header ${result.is_fraud ? 'fraudulent' : 'legitimate'}`}>
+          <div className={`result-header ${getTransactionStatus()}`}>
             <h3>
-              {result.is_fraud ? (
+              {getTransactionStatus() === "fraudulent" ? (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="15" y1="9" x2="9" y2="15"></line>
+                    <line x1="9" y1="9" x2="15" y2="15"></line>
+                  </svg>
+                  🚨 Fraudulent Transaction Detected
+                </>
+              ) : getTransactionStatus() === "suspicious" ? (
                 <>
                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon>
                     <line x1="12" y1="8" x2="12" y2="12"></line>
                     <line x1="12" y1="16" x2="12.01" y2="16"></line>
                   </svg>
-                  Potentially Fraudulent Transaction
+                  ⚠️ Suspicious Transaction - Review Required
                 </>
               ) : (
                 <>
@@ -254,7 +276,7 @@ const TransactionForm = () => {
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                     <polyline points="22 4 12 14.01 9 11.01"></polyline>
                   </svg>
-                  Transaction Appears Legitimate
+                  ✅ Normal Transaction - Safe to Proceed
                 </>
               )}
             </h3>
@@ -262,6 +284,23 @@ const TransactionForm = () => {
 
           <div className="result-details">
             <div className="result-summary">
+              <div className="summary-item">
+                <span>Status:</span>
+                <strong style={{
+                  color: getTransactionStatus() === "fraudulent" ? "#ef4444" :
+                    getTransactionStatus() === "suspicious" ? "#f59e0b" : "#10b981",
+                  fontSize: "18px",
+                  textTransform: "uppercase"
+                }}>
+                  {result.prediction || "Unknown"}
+                </strong>
+                {result.confidence && (
+                  <span style={{ marginLeft: '10px', opacity: 0.7, fontSize: '14px' }}>
+                    ({result.confidence} confidence)
+                  </span>
+                )}
+              </div>
+
               <div className="summary-item">
                 <span>Risk Score:</span>
                 <div
@@ -324,15 +363,20 @@ const TransactionForm = () => {
           </div>
 
           <div className="result-actions">
-            {result.is_fraud ? (
+            {getTransactionStatus() === "fraudulent" ? (
               <>
-                <button className="danger-button">Cancel Transaction</button>
-                <button className="caution-button">Proceed Anyway (Risky)</button>
+                <button className="danger-button">❌ Cancel Transaction</button>
+                <button className="caution-button">⚠️ Proceed Anyway (High Risk)</button>
+              </>
+            ) : getTransactionStatus() === "suspicious" ? (
+              <>
+                <button className="caution-button">⚠️ Review & Verify</button>
+                <button className="secondary-button">Proceed with Caution</button>
               </>
             ) : (
-              <button className="success-button">Proceed with Payment</button>
+              <button className="success-button">✅ Proceed with Payment</button>
             )}
-            <button className="secondary-button" onClick={resetForm}>New Check</button>
+            <button className="secondary-button" onClick={resetForm}>Check Another Transaction</button>
           </div>
         </div>
       )}

@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useMemo } from "react";
 import axios from "axios";
 import "./History.css";
@@ -60,9 +61,9 @@ const History = () => {
   const filteredTransactions = useMemo(() => {
     return transactions.filter((txn) => {
       return (
-        txn.sender.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        txn.receiver.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        txn.amount.toString().includes(searchTerm)
+        txn.sender?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        txn.receiver?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        txn.amount?.toString().includes(searchTerm)
       );
     });
   }, [transactions, searchTerm]);
@@ -155,22 +156,42 @@ const History = () => {
               </thead>
               <tbody>
                 {currentTransactions.length > 0 ? (
-                  currentTransactions.map((txn, index) => (
-                    <tr
-                      key={index}
-                      className={txn.is_fraud ? "fraud-transaction" : "legitimate-transaction"}
-                    >
-                      <td className="amount-cell">{formatAmount(txn.amount)}</td>
-                      <td>{txn.sender}</td>
-                      <td>{txn.receiver}</td>
-                      <td>{formatDate(txn.timestamp)}</td>
-                      <td>
-                        <span className={`status-badge ${txn.is_fraud ? "fraud" : "legitimate"}`}>
-                          {txn.is_fraud ? "Fraud" : "Legitimate"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
+                  currentTransactions.map((txn, index) => {
+                    // Determine status from backend response
+                    const getStatus = () => {
+                      // Check string status field first
+                      if (txn.status) {
+                        const status = txn.status.toLowerCase();
+                        if (status === "fraudulent" || status === "fraud") return "fraudulent";
+                        if (status === "suspicious") return "suspicious";
+                        return "normal";
+                      }
+                      // Fallback to boolean is_fraud
+                      if (txn.is_fraud === true) return "fraudulent";
+                      return "normal";
+                    };
+
+                    const status = getStatus();
+                    const statusClass = status === "fraudulent" ? "fraud-transaction" :
+                      status === "suspicious" ? "suspicious-transaction" :
+                        "legitimate-transaction";
+
+                    return (
+                      <tr key={index} className={statusClass}>
+                        <td className="amount-cell">{formatAmount(txn.amount)}</td>
+                        <td>{txn.sender}</td>
+                        <td>{txn.receiver}</td>
+                        <td>{formatDate(txn.timestamp)}</td>
+                        <td>
+                          <span className={`status-badge ${status}`}>
+                            {status === "fraudulent" ? "🚨 Fraudulent" :
+                              status === "suspicious" ? "⚠️ Suspicious" :
+                                "✅ Normal"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
                 ) : (
                   <tr>
                     <td colSpan="5" className="no-results">
@@ -206,8 +227,16 @@ const History = () => {
 
           <div className="summary-section">
             <p><strong>Total Transactions:</strong> {sortedTransactions.length}</p>
-            <p><strong>Fraud Transactions:</strong> {sortedTransactions.filter(txn => txn.is_fraud).length}</p>
-            <p><strong>Legitimate Transactions:</strong> {sortedTransactions.filter(txn => !txn.is_fraud).length}</p>
+            <p><strong>🚨 Fraudulent:</strong> {sortedTransactions.filter(txn =>
+              txn.status === "Fraudulent" || txn.status === "Fraud" || txn.is_fraud === true
+            ).length}</p>
+            <p><strong>⚠️ Suspicious:</strong> {sortedTransactions.filter(txn =>
+              txn.status === "Suspicious"
+            ).length}</p>
+            <p><strong>✅ Normal:</strong> {sortedTransactions.filter(txn =>
+              (txn.status === "Legitimate" || txn.status === "Normal" || txn.is_fraud === false) &&
+              txn.status !== "Suspicious"
+            ).length}</p>
           </div>
         </>
       )}

@@ -10,6 +10,8 @@ from datetime import datetime
 import logging
 import os
 import sys
+import sklearn_crfsuite
+from sklearn.preprocessing import StandardScaler
 
 # Import model class if available
 try:
@@ -53,25 +55,80 @@ except Exception as e:
     users_collection = None
     transactions_collection = None
 
-# Load models
+# ============= MODEL LOADING =============
 hmm_model = None
+crf_model = None
+scaler = None
+label_encoder = None
+
+# Load AR-HMM Model
 model_paths = [
+    "models/arlg_hmm_model.pkl",
     "hmm_fraud_model.pkl",
-    "../project/Backend/models/arlg_hmm_model (2).pkl",
-    "models/arlg_hmm_model (2).pkl"
+    "../project/Backend/models/arlg_hmm_model.pkl"
 ]
 
 for model_path in model_paths:
     if os.path.exists(model_path):
         try:
             hmm_model = joblib.load(model_path)
-            logger.info(f"HMM model loaded successfully from {model_path}")
+            logger.info(f"[OK] AR-HMM model loaded successfully from {model_path}")
             break
         except Exception as e:
-            logger.warning(f"Failed to load model from {model_path}: {e}")
+            logger.warning(f"Failed to load HMM model from {model_path}: {e}")
 
 if hmm_model is None:
-    logger.warning("No HMM model loaded. Predictions will use rule-based approach.")
+    logger.error("[ERR] No HMM model loaded. Predictions will use rule-based approach.")
+
+# Load CRF Model
+crf_paths = [
+    "models/crf_model.pkl",
+    "../project/Backend/models/crf_model.pkl"
+]
+
+for crf_path in crf_paths:
+    if os.path.exists(crf_path):
+        try:
+            crf_model = joblib.load(crf_path)
+            logger.info(f"[OK] CRF model loaded successfully from {crf_path}")
+            break
+        except Exception as e:
+            logger.warning(f"Failed to load CRF model from {crf_path}: {e}")
+
+if crf_model is None:
+    logger.warning("[WARN] CRF model not found, using HMM only")
+
+# Load Scaler and Encoder (CRITICAL for accuracy)
+scaler_paths = [
+    "models/scaler.pkl",
+    "../project/Backend/models/scaler.pkl"
+]
+
+encoder_paths = [
+    "models/label_encoder.pkl",
+    "../project/Backend/models/label_encoder.pkl"
+]
+
+for scaler_path in scaler_paths:
+    if os.path.exists(scaler_path):
+        try:
+            scaler = joblib.load(scaler_path)
+            logger.info(f"[OK] Scaler loaded successfully from {scaler_path}")
+            break
+        except Exception as e:
+            logger.warning(f"Failed to load scaler from {scaler_path}: {e}")
+
+for encoder_path in encoder_paths:
+    if os.path.exists(encoder_path):
+        try:
+            label_encoder = joblib.load(encoder_path)
+            logger.info(f"[OK] Label encoder loaded successfully from {encoder_path}")
+            break
+        except Exception as e:
+            logger.warning(f"Failed to load encoder from {encoder_path}: {e}")
+
+if scaler is None or label_encoder is None:
+    logger.warning("[WARN] Scaler/encoder not found - predictions may be less accurate")
 
 # Fallback dataset for feature calculation
 dataset = pd.DataFrame()
@@ -337,6 +394,134 @@ def check_fraud():
                 fraud_detected = False
                 model_confidence = 0.0
         
+        # ============= ENSEMBLE PREDICTION (HMM + CRF) =============
+        # Get HMM label (0=Normal, 1=Suspicious, 2=Fraud)
+        if fraud_detected:
+            hmm_label = 2  # Fraud
+        else:
+            hmm_label = 0  # Normal
+        
+        # Prepare features for scaling and CRF
+        # Get user statistics for feature preparation
+        user_stats = {
+            'count': 1,
+            'avg_amount': transaction_amount,
+            'max_amount': transaction_amount,
+            'frequency': 1
+        }
+        
+        if transactions_collection is not None:
+            try:
+                user_txs = list(transactions_collection.find(
+                    {"username": current_user_email},
+                    {"Transaction Amount (INR)": 1, "Transaction Time": 1}
+                ))
+                
+                if user_txs:
+                    amounts = [tx.get("Transaction Amount (INR)", 0) for tx in user_txs]
+                    user_stats['count'] = len(amounts)
+                    user_stats['avg_amount'] = np.mean(amounts)
+                    user_stats['max_amount'] = np.max(amounts)
+                    
+                    # Calculate frequency (transactions per month)
+                    if len(user_txs) > 1:
+                        times = [pd.to_datetime(tx.get("Transaction Time", datetime.now())) for tx in user_txs]
+                        time_span_days = (max(times) - min(times)).days
+                        if time_span_days > 0:
+                            user_stats['frequency'] = (len(user_txs) / time_span_days) * 30
+            except Exception as e:
+                logger.warning(f"Could not get user stats: {e}")
+        
+        # Extract time features
+        hour = transaction_time.hour
+        day_of_week = transaction_time.dayofweek
+        
+        # Calculate time anomaly (simplified)
+        time_anomaly = feature_vector[3] if len(feature_vector) > 3 else 0.0
+        
+        # Prepare raw features for scaling (8 features to match training)
+        raw_features = np.array([[
+            float(transaction_amount),
+            float(user_stats['avg_amount']),
+            float(user_stats['frequency']),
+            float(time_anomaly),
+            float(user_stats['count']),
+            float(hour),
+            float(day_of_week),
+            0  # location_cluster placeholder
+        ]])
+        
+        # Scale features if scaler is available
+        if scaler:
+            try:
+                scaled_features = scaler.transform(raw_features)
+                logger.info("[OK] Features scaled successfully")
+            except Exception as e:
+                logger.warning(f"[WARN] Scaling failed: {e}, using raw features")
+                scaled_features = raw_features
+        else:
+            scaled_features = raw_features
+            logger.warning("[WARN] No scaler available, using raw features")
+        
+        # CRF Prediction (if available)
+        confidence = "Medium (HMM only)"
+        final_label = hmm_label
+        
+        if crf_model:
+            try:
+                # Prepare features for CRF (expects dict format)
+                feature_names = [
+                    'amount', 'avg_amount', 'frequency', 'time_anomaly',
+                    'past_transactions', 'hour', 'day_of_week', 'location_cluster'
+                ]
+                feature_dict = {
+                    name: float(scaled_features[0][i]) 
+                    for i, name in enumerate(feature_names)
+                }
+                
+                # CRF prediction (expects list of sequences)
+                crf_pred = crf_model.predict([[feature_dict]])[0][0]
+                crf_label = int(crf_pred)
+                
+                # Ensemble Decision
+                if hmm_label == crf_label:
+                    final_label = hmm_label
+                    confidence = "High"
+                    logger.info(f"[OK] Models agree: {final_label}")
+                else:
+                    # When they disagree, use CRF (better at feature detection)
+                    final_label = crf_label
+                    confidence = "Medium"
+                    logger.info(f"[WARN] Models disagree - HMM: {hmm_label}, CRF: {crf_label}, Using: {final_label}")
+                    
+            except Exception as e:
+                logger.error(f"[ERR] CRF prediction failed: {e}")
+                final_label = hmm_label
+                confidence = "Low"
+        else:
+            logger.warning("[WARN] CRF not available, using HMM only")
+        
+        # Decode label to text
+        if label_encoder:
+            try:
+                prediction_text = label_encoder.inverse_transform([final_label])[0]
+                logger.info(f"[OK] Prediction decoded: {prediction_text}")
+            except Exception as e:
+                logger.error(f"[ERR] Label decoding failed: {e}")
+                # Fallback mapping
+                fraud_types = {0: "Normal", 1: "Suspicious", 2: "Fraud"}
+                prediction_text = fraud_types.get(final_label, "Unknown")
+        else:
+            # Fallback mapping if encoder not available
+            fraud_types = {0: "Normal", 1: "Suspicious", 2: "Fraud"}
+            prediction_text = fraud_types.get(final_label, "Unknown")
+        
+        # Update fraud_detected based on ensemble result
+        fraud_detected = (final_label >= 1)  # 1=Suspicious, 2=Fraud
+        model_confidence = 0.9 if confidence == "High" else (0.7 if confidence == "Medium" else 0.5)
+        
+        logger.info(f"Ensemble prediction: {prediction_text} (label: {final_label}, confidence: {confidence})")
+        
         logger.info(f"Model fraud decision: {fraud_detected} (confidence: {model_confidence})")
 
         # Calculate fraud score based on model confidence
@@ -357,7 +542,7 @@ def check_fraud():
                 # Get user's transaction statistics
                 user_txs = list(transactions_collection.find(
                     {"username": current_user_email},
-                    {"Transaction Amount (INR)": 1}
+                    {"Transaction Amount (INR)": 1, "Transaction Time": 1, "timestamp": 1}
                 ))
                 
                 if user_txs:
@@ -365,6 +550,22 @@ def check_fraud():
                     user_avg_amount = np.mean(amounts)
                     user_max_amount = np.max(amounts)
                     user_std_amount = np.std(amounts) if len(amounts) > 1 else 0
+                    
+                    # Chronologically last transaction (for "last amount" message)
+                    def _tx_time(t):
+                        ts = t.get("timestamp") or t.get("Transaction Time")
+                        if ts is None:
+                            return datetime.min
+                        try:
+                            return pd.to_datetime(ts, errors="coerce") or datetime.min
+                        except Exception:
+                            return datetime.min
+                    try:
+                        user_txs_sorted = sorted(user_txs, key=lambda t: _tx_time(t), reverse=True)
+                    except Exception:
+                        user_txs_sorted = user_txs
+                    last_amount = user_txs_sorted[0].get("Transaction Amount (INR)", 0) if user_txs_sorted else transaction_amount
+                    amount_diff_vs_last = abs(float(transaction_amount) - float(last_amount))
                     
                     # Check if current amount is unusual FOR THIS USER
                     if user_std_amount > 0:
@@ -378,9 +579,12 @@ def check_fraud():
                     if transaction_amount > user_max_amount:
                         risk_factors.append(f"💰 This is your highest transaction ever (previous max: ₹{user_max_amount:,.0f})")
                     
-                    # Check deviation from last transaction
-                    if feature_vector[1] > user_avg_amount:
-                        risk_factors.append(f"⚡ Large jump from your last transaction (₹{feature_vector[1]:,.0f} increase)")
+                    # Large change vs last transaction (show correct direction: increase vs decrease)
+                    if amount_diff_vs_last > user_avg_amount:
+                        if transaction_amount > last_amount:
+                            risk_factors.append(f"⚡ Large jump from your last transaction (₹{amount_diff_vs_last:,.0f} increase)")
+                        else:
+                            risk_factors.append(f"⚡ Large drop from your last transaction (₹{amount_diff_vs_last:,.0f} decrease)")
             except Exception as e:
                 logger.warning(f"Could not calculate user statistics: {e}")
         
@@ -417,6 +621,9 @@ def check_fraud():
         else:
             recommendation = "✅ Transaction appears normal based on your historical patterns. Safe to proceed."
 
+        # Map label to status for storage (0=Normal, 1=Suspicious, 2=Fraud)
+        prediction_status = "Normal" if final_label == 0 else ("Suspicious" if final_label == 1 else "Fraud")
+
         # Save to database with user's email
         if transactions_collection is not None:
             try:
@@ -429,6 +636,7 @@ def check_fraud():
                     "Category": category,
                     "Description": description,
                     "Fraud Detected": fraud_detected,
+                    "Prediction Status": prediction_status,  # Normal | Suspicious | Fraud
                     "Fraud Score": fraud_score,
                     "Risk Factors": risk_factors,
                     "timestamp": datetime.now()
@@ -437,11 +645,28 @@ def check_fraud():
             except Exception as db_error:
                 logger.warning(f"Database save error: {db_error}")
 
+        # Ensure JSON-serializable types (numpy int64/float64 are not serializable)
+        def _native(val):
+            if isinstance(val, (np.integer, np.int64)):
+                return int(val)
+            if isinstance(val, (np.floating, np.float64)):
+                return float(val)
+            if isinstance(val, np.ndarray):
+                return val.tolist()
+            return val
+
         return jsonify({
-            "is_fraud": fraud_detected,
-            "fraud_score": fraud_score,
+            "is_fraud": bool(fraud_detected),
+            "fraud_score": float(_native(fraud_score)),
             "risk_factors": risk_factors if risk_factors else ["No significant risk factors detected"],
-            "recommendation": recommendation
+            "recommendation": recommendation,
+            "confidence": confidence,
+            "prediction": prediction_status,  # Normal | Suspicious | Fraud (so frontend shows 3 tiers)
+            "model_details": {
+                "hmm_available": hmm_model is not None,
+                "crf_available": crf_model is not None,
+                "scaler_available": scaler is not None
+            }
         })
 
     except ValueError as ve:
@@ -469,16 +694,23 @@ def history():
             {"_id": 0}
         ).sort("timestamp", -1).limit(100))
         
-        # Convert to frontend format
+        # Convert to frontend format (Normal | Suspicious | Fraudulent)
+        status_map = {"Normal": "Normal", "Suspicious": "Suspicious", "Fraud": "Fraudulent"}
         formatted_transactions = []
         for tx in transactions:
+            stored_status = tx.get("Prediction Status")
+            if stored_status in status_map:
+                status = status_map[stored_status]
+            else:
+                # Backward compatibility: old records only have Fraud Detected
+                status = "Fraudulent" if tx.get("Fraud Detected", False) else "Legitimate"
             formatted_transactions.append({
                 "id": str(tx.get("timestamp", "")),
                 "amount": tx.get("Transaction Amount (INR)", 0),
                 "sender": tx.get("Sender UPI ID", ""),
                 "receiver": tx.get("Receiver UPI ID", ""),
                 "timestamp": tx.get("Transaction Time", ""),
-                "status": "Fraudulent" if tx.get("Fraud Detected", False) else "Legitimate",
+                "status": status,
                 "risk_score": tx.get("Fraud Score", 0),
                 "category": tx.get("Category", ""),
                 "description": tx.get("Description", "")
