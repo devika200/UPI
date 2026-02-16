@@ -1,13 +1,12 @@
+# Native Python: Render uses runtime.txt (repo root) for Python version
 services:
   - type: web
     name: upi-fraud-detection-api
-    env: python
+    runtime: python
     rootDir: Backend
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn mainapp:app
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.0
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: MONGODB_URI
