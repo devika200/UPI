@@ -32,7 +32,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=[
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://upi-secure.netlify.app"
+])
 bcrypt = Bcrypt(app)
 
 # JWT secret
@@ -40,7 +44,25 @@ app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "1234567890")  # Use 
 jwt = JWTManager(app)
 
 # MongoDB setup (optional - will work without it)
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
+# Escape username/password in URI per RFC 3986 (fixes "must be escaped" error on Render)
+def _safe_mongodb_uri(uri):
+    if not uri or "@" not in uri or "://" not in uri:
+        return uri
+    from urllib.parse import urlparse, quote_plus, urlunparse
+    parsed = urlparse(uri)
+    if parsed.username is not None or parsed.password is not None:
+        netloc = parsed.hostname or ""
+        if parsed.port is not None:
+            netloc = f"{netloc}:{parsed.port}"
+        user = quote_plus(parsed.username) if parsed.username is not None else ""
+        passwd = quote_plus(parsed.password) if parsed.password is not None else ""
+        if user or passwd:
+            netloc = f"{user}:{passwd}@{netloc}" if passwd else f"{user}@{netloc}"
+        parsed = parsed._replace(netloc=netloc)
+        return urlunparse(parsed)
+    return uri
+
+MONGODB_URI = _safe_mongodb_uri(os.getenv("MONGODB_URI", "mongodb://localhost:27017/"))
 try:
     client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=2000)
     client.server_info()  # Test connection
@@ -61,7 +83,11 @@ crf_model = None
 scaler = None
 label_encoder = None
 
-# Load AR-HMM Model
+# Load AR-HMM Model (pickle expects __main__.AutoRegressiveHMM if saved from a script)
+if AutoRegressiveHMM is not None:
+    import sys
+    sys.modules["__main__"].AutoRegressiveHMM = AutoRegressiveHMM
+
 model_paths = [
     "models/arlg_hmm_model.pkl",
     "hmm_fraud_model.pkl",
