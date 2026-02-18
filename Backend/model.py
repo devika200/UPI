@@ -1,8 +1,12 @@
 import numpy as np
 import pandas as pd
+import warnings
 from hmmlearn.hmm import GaussianHMM
 from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import mahalanobis
+
+# Suppress pandas PerformanceWarning
+warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
 
 
 class AutoRegressiveHMM:

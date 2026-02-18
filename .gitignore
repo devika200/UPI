@@ -39,6 +39,9 @@ api.log
 .env.local
 .env.production.local
 
+# Kiro (local development only)
+.kiro/
+
 # Database
 *.db
 *.sqlite
