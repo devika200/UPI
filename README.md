@@ -27,9 +27,11 @@ AI-powered real-time fraud detection for UPI transactions using Hidden Markov Mo
 
 ### Machine Learning
 - Hidden Markov Models (HMM)
+- Conditional Random Fields (CRF)
 - scikit-learn
 - pandas, numpy
 - hmmlearn
+- sklearn-crfsuite
 
 ## 📦 Project Structure
 
@@ -93,11 +95,11 @@ All free tier available!
 
 1. **User Registration/Login** - Secure authentication with JWT
 2. **Transaction Submission** - User submits transaction details
-3. **Feature Extraction** - System calculates 20+ features from transaction
-4. **Historical Analysis** - Compares with user's past behavior
-5. **ML Prediction** - HMM model analyzes patterns
-6. **Risk Assessment** - Returns fraud score and risk factors
-7. **History Tracking** - Saves for future learning
+3. **Feature Extraction** - System calculates 10 features from transaction
+4. **Historical Analysis** - Retrieves last 2 transactions for lagging
+5. **Ensemble ML Prediction** - HMM and CRF models analyze patterns
+6. **Risk Assessment** - Returns fraud score, risk factors, and confidence level
+7. **History Tracking** - Saves transaction with prediction for future learning
 
 ## 🔒 Security Features
 
@@ -110,19 +112,30 @@ All free tier available!
 
 ## 📈 ML Model Details
 
-**Algorithm**: Auto-Regressive Hidden Markov Model (AR-HMM)
+**Algorithms**: Ensemble of HMM (Hidden Markov Model) and CRF (Conditional Random Field)
 
-**Features Used** (20 total):
-- Transaction amount
-- Amount difference from average
-- Transaction frequency
-- Time anomaly score
-- Recipient statistics
-- Risk score
-- Time features (hour, day)
-- Location hashes (10 features)
+**Features Used** (10 total):
+- Transaction Amount (INR)
+- Transaction Amount Difference from average
+- Transaction Frequency Score
+- Time Anomaly Score
+- Recipient Total Transactions
+- Recipient Average Transaction Amount
+- Risk Score
+- Hour of transaction
+- Day of week
+- Location Cluster
 
-**Training**: Model trained on balanced dataset with fraud/legitimate transactions
+**Classification Labels**:
+- 0: Normal (Low fraud risk)
+- 1: Suspicious (Medium fraud risk)
+- 2: Fraud (High fraud risk)
+
+**Ensemble Scoring**:
+- HMM prediction: Uses lagged features from last 2 transactions (requires ≥4 rows)
+- CRF prediction: Uses current scaled features
+- Final score: Average of both models (0.0-1.0)
+- Confidence: High (≥0.67), Medium (0.33-0.67), Low (<0.33)
 
 ## 🎯 API Endpoints
 

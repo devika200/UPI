@@ -82,21 +82,33 @@ def check_fraud():
         # Decode prediction
         prediction_text = fraud_service.decode_label(final_label)
 
-        # Analyze risk factors
+        # Analyze risk factors (rule-based)
         risk_factors = risk_service.analyze_risk_factors(
             current_user_email, 
             transaction_amount, 
             feature_vector
         )
 
-        if fraud_detected:
-            risk_factors.insert(0, "ML Model detected anomalous transaction pattern")
+        # Integrate ML prediction with risk factors
+        # Weight risk factors by fraud_score for better context
+        if fraud_score >= 0.67:
+            # High fraud risk
+            risk_factors.insert(0, f"ML Model detected FRAUD pattern (score: {fraud_score:.2f})")
+            if not any("pattern" in rf.lower() for rf in risk_factors):
+                risk_factors.append("Transaction pattern is highly anomalous")
+        elif fraud_score >= 0.33:
+            # Suspicious
+            risk_factors.insert(0, f"ML Model flagged as SUSPICIOUS (score: {fraud_score:.2f})")
+            if not any("unusual" in rf.lower() or "anomal" in rf.lower() for rf in risk_factors):
+                risk_factors.append("Transaction shows some unusual characteristics")
+        else:
+            # Normal
+            if not risk_factors:
+                risk_factors.append(f"Transaction appears normal (ML score: {fraud_score:.2f})")
 
-        if fraud_detected and len(risk_factors) == 1:
-            risk_factors.append("Transaction pattern deviates from your normal behavior")
-
+        # Ensure at least one risk factor
         if not risk_factors:
-            risk_factors.append("Transaction matches your normal patterns")
+            risk_factors.append("No significant risk factors detected")
 
         # Generate recommendation
         recommendation = risk_service.generate_recommendation(fraud_score)

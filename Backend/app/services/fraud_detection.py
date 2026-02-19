@@ -20,20 +20,24 @@ class FraudDetectionService:
     
     
     
+    # Notebook's exact feature column names (must match CRF training attributes)
+    FEATURE_NAMES = [
+        'Transaction Amount (INR)', 'Transaction_Amount_Diff',
+        'Transaction_Frequency_Score', 'Time_Anomaly_Score',
+        'Recipient_Total_Transactions', 'Recipient_Avg_Transaction_Amount',
+        'Risk_Score', 'hour', 'day_of_week', 'Location_Cluster'
+    ]
+
     def _convert_to_crf_format(self, feature_array, feature_names=None):
-        """Convert feature array to CRF dict format
+        """Convert feature array to CRF dict format using notebook's exact attribute names
         
         Input: np.ndarray of shape (1, 10)
-        Output: [[{'feature_0': 0.5, 'feature_1': 0.3, ...}]]
-        
-        Returns:
-            List of sequences, each sequence is list of dicts
+        Output: [[{'Transaction Amount (INR)': 0.5, ...}]]
         """
         try:
             if feature_names is None:
-                feature_names = [f'feature_{i}' for i in range(feature_array.shape[1])]
+                feature_names = self.FEATURE_NAMES
             
-            # Convert numpy array to list of dicts
             crf_input = []
             for features in feature_array:
                 feature_dict = {feature_names[i]: float(features[i]) for i in range(len(features))}
@@ -44,7 +48,7 @@ class FraudDetectionService:
             logger.error(f"[ERROR] [FraudDetectionService] CRF format conversion failed: {e}")
             return None
     
-    def _get_user_transaction_history(self, username, transactions_collection, limit=2):
+    def _get_user_transaction_history(self, username, transactions_collection, limit=3):
         """Get user's recent transactions from MongoDB for lagging
         
         Returns:
@@ -116,66 +120,52 @@ class FraudDetectionService:
                 logger.error(f"[ERROR] [FraudDetectionService] [username={username}] Scaling features failed: {e}")
                 scaled_matrix = feature_matrix
             
-            # HMM prediction - pass multiple rows so it can create lagging internally
-            # The HMM's create_lag_features() will shift rows to create lagged features
-            try:
-                hmm_predictions = self.model_manager.hmm_model.predict(scaled_matrix)
-                logger.info(f"[INFO] [FraudDetectionService] [username={username}] HMM Predictions: {hmm_predictions}")
-                # Get the prediction for the last row (current transaction)
-                hmm_state = int(hmm_predictions[-1])
-                logger.info(f"[INFO] [FraudDetectionService] [username={username}] HMM State (last row): {hmm_state}")
-            except Exception as e:
-                logger.error(f"[ERROR] [FraudDetectionService] [username={username}] HMM prediction failed: {e}")
-                return False, 0.5, 1, "Medium"
+            # HMM prediction: only use if we have enough history (n_lags rows)
+            # Otherwise, HMM with zero-padding is unreliable
+            n_lags = self.n_lags
+            hmm_state = None
+            
+            if len(scaled_matrix) >= n_lags:
+                try:
+                    # Create one lagged observation from the last (n_lags+1) rows
+                    # Matches notebook: np.hstack([X[i-j] for j in range(n_lags)])
+                    lagged_row = np.hstack([scaled_matrix[-1 - j] for j in range(n_lags)])
+                    X_hmm = lagged_row.reshape(1, -1)  # shape (1, 30)
+                    logger.info(f"[INFO] [FraudDetectionService] [username={username}] HMM input shape: {X_hmm.shape}")
+                    hmm_state = int(self.model_manager.hmm_model.predict(X_hmm)[0])
+                    logger.info(f"[INFO] [FraudDetectionService] [username={username}] HMM State: {hmm_state}")
+                except Exception as e:
+                    logger.error(f"[ERROR] [FraudDetectionService] [username={username}] HMM prediction failed: {e}")
+                    hmm_state = None
+            else:
+                logger.info(f"[INFO] [FraudDetectionService] [username={username}] Insufficient history ({len(scaled_matrix)} rows < {n_lags + 1}), skipping HMM")
 
-            # Map HMM hidden state to risk probability
-            # State 0: low risk (0.0), State 1: medium risk (0.5), State 2: high risk (1.0)
-            hmm_prob = float(hmm_state) / 2.0
-            logger.info(f"[INFO] [FraudDetectionService] [username={username}] HMM Probability: {hmm_prob:.2f}")
-
-            # Scale current features for CRF
-            try:
-                scaled_current = self.model_manager.scaler.transform([feature_vector])
-                logger.info(f"[INFO] [FraudDetectionService] [username={username}] Scaled Current Features: {scaled_current[0]}")
-            except Exception as e:
-                logger.error(f"[ERROR] [FraudDetectionService] [username={username}] Scaling current features failed: {e}")
-                scaled_current = np.array([feature_vector])
-
-            # CRF prediction (returns class labels: '0', '1', or '2')
-            crf_prob = hmm_prob  # Default to HMM probability
+            # CRF prediction on current (scaled) features using notebook's named attributes
+            scaled_current = scaled_matrix[-1].reshape(1, -1)  # last row = current tx
             crf_label = None
             if self.model_manager.crf_model:
                 try:
-                    # Convert scaled features to CRF dict format
                     crf_input = self._convert_to_crf_format(scaled_current)
-                    logger.info(f"[INFO] [FraudDetectionService] [username={username}] CRF Input Format: {crf_input}")
                     if crf_input is not None:
-                        crf_predictions = self.model_manager.crf_model.predict(crf_input)
-                        logger.info(f"[INFO] [FraudDetectionService] [username={username}] CRF Predictions: {crf_predictions}")
-                        crf_label = str(crf_predictions[0][0])
-                        logger.info(f"[INFO] [FraudDetectionService] [username={username}] CRF Label (string): {crf_label}")
-                        # Map CRF label to risk probability
-                        crf_prob = float(crf_label) / 2.0
-                        logger.info(f"[INFO] [FraudDetectionService] [username={username}] CRF Probability: {crf_prob:.2f}")
-                    else:
-                        logger.warning(f"[WARN] [FraudDetectionService] [username={username}] CRF format conversion returned None")
+                        crf_label = int(self.model_manager.crf_model.predict(crf_input)[0][0])
+                        logger.info(f"[INFO] [FraudDetectionService] [username={username}] CRF Label: {crf_label}")
                 except Exception as e:
                     logger.error(f"[ERROR] [FraudDetectionService] [username={username}] CRF prediction failed: {e}")
-                    crf_prob = hmm_prob
 
-            # Ensemble: average the probabilities
-            ensemble_fraud_score = (hmm_prob + crf_prob) / 2.0
-            logger.info(f"[INFO] [FraudDetectionService] [username={username}] Ensemble Score: {ensemble_fraud_score:.2f}")
-
-            # Classify based on probability thresholds
-            # Adjusted thresholds to reduce false positives
-            if ensemble_fraud_score >= 0.9:  # Fraud (very high confidence)
+            # Ensemble: average HMM and CRF probabilities
+            # Both models contribute equally to fraud detection
+            hmm_prob = float(hmm_state) / 2.0 if hmm_state is not None else 0.5
+            crf_prob = float(crf_label) / 2.0 if crf_label is not None else 0.5
+            fraud_score = (hmm_prob + crf_prob) / 2.0
+            
+            # Map score to label: 0=Normal, 1=Suspicious, 2=Fraud
+            if fraud_score >= 0.67:
                 final_label = 2
                 confidence = "High"
-            elif ensemble_fraud_score >= 0.7:  # Suspicious (high confidence)
+            elif fraud_score >= 0.33:
                 final_label = 1
                 confidence = "Medium"
-            else:  # Normal
+            else:
                 final_label = 0
                 confidence = "Low"
 
@@ -184,12 +174,12 @@ class FraudDetectionService:
             logger.info(f"[INFO] [FraudDetectionService] [username={username}] ===== FINAL PREDICTION =====")
             logger.info(f"[INFO] [FraudDetectionService] [username={username}] HMM State: {hmm_state} (prob: {hmm_prob:.2f})")
             logger.info(f"[INFO] [FraudDetectionService] [username={username}] CRF Label: {crf_label} (prob: {crf_prob:.2f})")
-            logger.info(f"[INFO] [FraudDetectionService] [username={username}] Ensemble Score: {ensemble_fraud_score:.2f}")
+            logger.info(f"[INFO] [FraudDetectionService] [username={username}] Ensemble Score: {fraud_score:.2f}")
             logger.info(f"[INFO] [FraudDetectionService] [username={username}] Final Label: {final_label} ({self.decode_label(final_label)})")
             logger.info(f"[INFO] [FraudDetectionService] [username={username}] Confidence: {confidence}")
             logger.info(f"[INFO] [FraudDetectionService] [username={username}] Fraud Detected: {fraud_detected}")
 
-            return fraud_detected, ensemble_fraud_score, final_label, confidence
+            return fraud_detected, fraud_score, final_label, confidence
 
         except Exception as e:
             logger.error(f"[ERROR] [FraudDetectionService] [username={username}] Model prediction failed: {e}")
